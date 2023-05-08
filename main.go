@@ -107,7 +107,7 @@ func GetIPsFromDomain(domain string) []string {
 	return hostRecords
 }
 
-func GetRouteTables(svc *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRoute, error) {
+func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRoute, error) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
@@ -115,7 +115,7 @@ func GetRouteTables(svc *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRou
 	// fetch all VPN routes using pagination
 	var allRoutes []types.ClientVpnRoute
 
-	paginator := ec2.NewDescribeClientVpnRoutesPaginator(svc, params)
+	paginator := ec2.NewDescribeClientVpnRoutesPaginator(client, params)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.Background())
 		if err != nil {
@@ -139,6 +139,44 @@ func GetRouteTables(svc *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRou
 
 	return allRoutes, nil
 }
+
+//func updateRouteTables(client *ec2.Client, vpnEndpointID, routeTableID string) error {
+//	// Describe existing associations
+//	associationsInput := &ec2.DescribeClientVpnTargetNetworksInput{
+//		ClientVpnEndpointId: &vpnEndpointID,
+//	}
+//
+//	associationsOutput, err := client.DescribeClientVpnTargetNetworks(client, associationsInput)
+//	if err != nil {
+//		return fmt.Errorf("failed to describe client VPN target networks: %v", err)
+//	}
+//
+//	for _, association := range associationsOutput.ClientVpnTargetNetworks {
+//		// Disassociate existing route table
+//		disassociateInput := &ec2.DisassociateClientVpnTargetNetworkInput{
+//			AssociationId:       association.AssociationId,
+//			ClientVpnEndpointId: &vpnEndpointID,
+//		}
+//
+//		_, err = client.DisassociateClientVpnTargetNetwork(ctx, disassociateInput)
+//		if err != nil {
+//			return fmt.Errorf("failed to disassociate route table: %v", err)
+//		}
+//
+//		// Associate new route table
+//		associateInput := &ec2.AssociateClientVpnTargetNetworkInput{
+//			ClientVpnEndpointId: &vpnEndpointID,
+//			SubnetId:            association.TargetNetworkId,
+//		}
+//
+//		_, err = svc.AssociateClientVpnTargetNetwork(ctx, associateInput)
+//		if err != nil {
+//			return fmt.Errorf("failed to associate new route table: %v", err)
+//		}
+//	}
+//
+//	return nil
+//}
 
 // func HandleRequest(ctx context.Context) (Response, error) {
 func HandleRequest() (Response, error) {
