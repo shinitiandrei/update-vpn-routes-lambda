@@ -9,7 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"log"
+	"net"
 	"os"
+	"strings"
 )
 
 type Response struct {
@@ -26,7 +28,7 @@ func NewEC2Session(region string) (context.Context, *ec2.Client, error) {
 	return ctx, svc, nil
 }
 
-func ListClientVpnEndpoints(ctx context.Context, svc *ec2.Client) (string, error) {
+func GetVPNEndpointID(ctx context.Context, svc *ec2.Client) (string, error) {
 	input := &ec2.DescribeClientVpnEndpointsInput{}
 	result, err := svc.DescribeClientVpnEndpoints(ctx, input)
 	if err != nil {
@@ -90,13 +92,29 @@ func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEnd
 	return associatedRouteTables, nil
 }
 
-func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) ([]*types.ClientVpnRoute, error) {
+func GetIPsFromDomain(domain string) []string {
+	// retrieve A/AAAA records
+	log.Println("Fetching A/AAA IP addresses for ", domain)
+	hostRecords, err := net.LookupHost(domain)
+	if err == nil {
+		fmt.Println("IP addresses:")
+		for _, record := range hostRecords {
+			fmt.Println(record)
+		}
+	} else {
+		fmt.Println("Error:", err)
+	}
+	return hostRecords
+}
+
+func GetRouteTables(svc *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRoute, error) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
 
 	// fetch all VPN routes using pagination
-	var allRoutes []*types.ClientVpnRoute
+	var allRoutes []types.ClientVpnRoute
+
 	paginator := ec2.NewDescribeClientVpnRoutesPaginator(svc, params)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.Background())
@@ -106,8 +124,11 @@ func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) 
 		}
 
 		for _, route := range page.Routes {
-			fmt.Println("destination: %s", *route.DestinationCidr)
-			allRoutes = append(allRoutes, &route)
+			if route.Description != nil {
+				if strings.Contains(*route.Description, "Luke API IP") {
+					allRoutes = append(allRoutes, route)
+				}
+			}
 		}
 	}
 
@@ -123,12 +144,17 @@ func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) 
 func HandleRequest() (Response, error) {
 	ctx, svc, err := NewEC2Session("ap-southeast-2")
 
-	clientVpnEndpoints, err := ListClientVpnEndpoints(ctx, svc)
+	//lukeIps := GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au")
+
+	clientVpnEndpoints, err := GetVPNEndpointID(ctx, svc)
 	if err != nil {
 		return Response{}, err
 	}
 
-	routeTables, err := getRouteTables(ctx, svc, "cvpn-endpoint-0180bd612766c9023")
+	routeTables, err := GetRouteTables(svc, "cvpn-endpoint-0180bd612766c9023")
+	if err != nil {
+		return Response{}, err
+	}
 
 	return Response{
 		Message: fmt.Sprintf("Client VPN Endpoints: %s \n route tables: %s", clientVpnEndpoints, routeTables),
