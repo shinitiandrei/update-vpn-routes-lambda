@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"log"
+	"os"
 )
 
 type Response struct {
@@ -89,44 +90,56 @@ func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEnd
 	return associatedRouteTables, nil
 }
 
-func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) ([]*types.RouteTable, error) {
+// func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) ([]*types.RouteTable, error) {
+func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) (string, error) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
 
-	result, err := svc.DescribeClientVpnRoutes(ctx, params)
+	//result, err := svc.DescribeClientVpnRoutes(ctx, params)
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to describe client VPN target networks: %v", err)
+	// fetch all VPN routes using pagination
+	var allRoutes []*types.ClientVpnRoute
+	paginator := ec2.NewDescribeClientVpnRoutesPaginator(svc, params)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.Background())
+		if err != nil {
+			fmt.Println("Error describing VPN routes:", err)
+			os.Exit(1)
+		}
+
+		for _, route := range page.Routes {
+			allRoutes = append(allRoutes, &route)
+		}
 	}
 
-	routeTableDesc := make([]string, 0, len(result.Routes))
-	for _, route := range result.Routes {
-		log.Println(*route.Description)
-		log.Println(*route.DestinationCidr)
-		routeTableDesc = append(routeTableDesc, *route.Description)
+	// print the CIDR blocks of each route
+	for _, route := range allRoutes {
+		fmt.Println(*route.Description)
 	}
 
-	routeTablesInput := &ec2.DescribeRouteTablesInput{
-		Filters: []types.Filter{
-			{
-				Name:   aws.String("association.route-table-id"),
-				Values: routeTableDesc,
-			},
-		},
-	}
+	//routeTableDesc := make([]string, 0, len(routes.Routes))
+	//
+	//routeTablesInput := &ec2.DescribeRouteTablesInput{
+	//	Filters: []types.Filter{
+	//		{
+	//			Name:   aws.String("association.route-table-id"),
+	//			Values: routeTableDesc,
+	//		},
+	//	},
+	//}
 
-	routeTablesOutput, err := svc.DescribeRouteTables(ctx, routeTablesInput)
-	if err != nil {
-		return nil, fmt.Errorf("failed to describe route tables: %v", err)
-	}
+	//routeTablesOutput, err := svc.DescribeRouteTables(ctx, routeTablesInput)
+	//if err != nil {
+	//	return nil, fmt.Errorf("failed to describe route tables: %v", err)
+	//}
+	//
+	//routeTables := make([]*types.RouteTable, len(routeTablesOutput.RouteTables))
+	//for i, rt := range routeTablesOutput.RouteTables {
+	//	routeTables[i] = &rt
+	//}
 
-	routeTables := make([]*types.RouteTable, len(routeTablesOutput.RouteTables))
-	for i, rt := range routeTablesOutput.RouteTables {
-		routeTables[i] = &rt
-	}
-
-	return routeTables, nil
+	return "routeTables", nil
 }
 
 // func HandleRequest(ctx context.Context) (Response, error) {
