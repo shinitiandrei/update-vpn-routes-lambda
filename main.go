@@ -90,13 +90,10 @@ func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEnd
 	return associatedRouteTables, nil
 }
 
-// func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) ([]*types.RouteTable, error) {
-func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) (string, error) {
+func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) ([]*types.ClientVpnRoute, error) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
-
-	//result, err := svc.DescribeClientVpnRoutes(ctx, params)
 
 	// fetch all VPN routes using pagination
 	var allRoutes []*types.ClientVpnRoute
@@ -109,37 +106,17 @@ func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) 
 		}
 
 		for _, route := range page.Routes {
+			fmt.Println("destination: %s", *route.DestinationCidr)
 			allRoutes = append(allRoutes, &route)
 		}
 	}
 
 	// print the CIDR blocks of each route
 	for _, route := range allRoutes {
-		fmt.Println(*route.Description)
+		fmt.Println(*route.DestinationCidr)
 	}
 
-	//routeTableDesc := make([]string, 0, len(routes.Routes))
-	//
-	//routeTablesInput := &ec2.DescribeRouteTablesInput{
-	//	Filters: []types.Filter{
-	//		{
-	//			Name:   aws.String("association.route-table-id"),
-	//			Values: routeTableDesc,
-	//		},
-	//	},
-	//}
-
-	//routeTablesOutput, err := svc.DescribeRouteTables(ctx, routeTablesInput)
-	//if err != nil {
-	//	return nil, fmt.Errorf("failed to describe route tables: %v", err)
-	//}
-	//
-	//routeTables := make([]*types.RouteTable, len(routeTablesOutput.RouteTables))
-	//for i, rt := range routeTablesOutput.RouteTables {
-	//	routeTables[i] = &rt
-	//}
-
-	return "routeTables", nil
+	return allRoutes, nil
 }
 
 // func HandleRequest(ctx context.Context) (Response, error) {
