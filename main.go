@@ -13,14 +13,17 @@ type Response struct {
 	Message string `json:"message"`
 }
 
-func ListClientVpnEndpoints() (string, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("ap-southeast-2")) // Change to your desired region
+func NewAWSSession(region string) (context.Context, *ec2.Client, error) {
+	ctx := context.TODO()
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
-
 	svc := ec2.NewFromConfig(cfg)
+	return ctx, svc, nil
+}
 
+func ListClientVpnEndpoints(ctx context.Context, svc *ec2.Client) (string, error) {
 	input := &ec2.DescribeClientVpnEndpointsInput{}
 	result, err := svc.DescribeClientVpnEndpoints(context.TODO(), input)
 	if err != nil {
@@ -40,24 +43,60 @@ func ListClientVpnEndpoints() (string, error) {
 	return string(clientVpnEndpointsJSON), nil
 }
 
+func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEndpointId string) ([]string, error) {
+	targetNetworksInput := &ec2.DescribeClientVpnTargetNetworksInput{
+		ClientVpnEndpointId: &clientVpnEndpointId,
+	}
+	targetNetworksResult, err := svc.DescribeClientVpnTargetNetworks(context.TODO(), targetNetworksInput)
+	if err != nil {
+		return nil, err
+	}
+
+	associatedSubnets := make(map[string]struct{}, len(targetNetworksResult.ClientVpnTargetNetworks))
+	for _, targetNetwork := range targetNetworksResult.ClientVpnTargetNetworks {
+		associatedSubnets[*targetNetwork.TargetNetworkId] = struct{}{}
+	}
+
+	routeTablesInput := &ec2.DescribeRouteTablesInput{}
+	routeTablesResult, err := svc.DescribeRouteTables(context.TODO(), routeTablesInput)
+	if err != nil {
+		return nil, err
+	}
+
+	associatedRouteTables := make([]string, 0)
+	for _, routeTable := range routeTablesResult.RouteTables {
+		for _, association := range routeTable.Associations {
+			if _, ok := associatedSubnets[*association.SubnetId]; ok {
+				associatedRouteTables = append(associatedRouteTables, *routeTable.RouteTableId)
+				break
+			}
+		}
+	}
+
+	return associatedRouteTables, nil
+}
+
 // func HandleRequest(ctx context.Context) (Response, error) {
 func HandleRequest() (Response, error) {
-	clientVpnEndpoints, err := ListClientVpnEndpoints()
+	ctx, svc, err := NewAWSSession("ap-southeast-2")
+
+	clientVpnEndpoints, err := ListClientVpnEndpoints(ctx, svc)
 	if err != nil {
 		return Response{}, err
 	}
-	log.Printf("Client VPN Endpoints: %s\n", clientVpnEndpoints)
+
+	routeTables, err := GetAssociatedRouteTables(ctx, svc, clientVpnEndpoints)
 
 	return Response{
-		Message: fmt.Sprintf("Client VPN Endpoints: %s", clientVpnEndpoints),
+		Message: fmt.Sprintf("Client VPN Endpoints: %s \n route tables: %s", clientVpnEndpoints, routeTables),
 	}, nil
 }
 
 func main() {
 	//lambda.Start(HandleRequest)
-	_, err := HandleRequest()
+	res, err := HandleRequest()
 	if err != nil {
 		return
 	}
-	log.Println("working")
+	log.Println(res)
 }
