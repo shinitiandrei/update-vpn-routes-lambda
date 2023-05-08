@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"log"
 )
 
@@ -13,7 +15,7 @@ type Response struct {
 	Message string `json:"message"`
 }
 
-func NewAWSSession(region string) (context.Context, *ec2.Client, error) {
+func NewEC2Session(region string) (context.Context, *ec2.Client, error) {
 	ctx := context.TODO()
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
@@ -25,7 +27,7 @@ func NewAWSSession(region string) (context.Context, *ec2.Client, error) {
 
 func ListClientVpnEndpoints(ctx context.Context, svc *ec2.Client) (string, error) {
 	input := &ec2.DescribeClientVpnEndpointsInput{}
-	result, err := svc.DescribeClientVpnEndpoints(context.TODO(), input)
+	result, err := svc.DescribeClientVpnEndpoints(ctx, input)
 	if err != nil {
 		return "", err
 	}
@@ -44,10 +46,21 @@ func ListClientVpnEndpoints(ctx context.Context, svc *ec2.Client) (string, error
 }
 
 func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEndpointId string) ([]string, error) {
+
+	sample := &ec2.DescribeClientVpnRoutesInput{
+		ClientVpnEndpointId: &clientVpnEndpointId,
+	}
+
+	log.Print(sample.MaxResults)
+
 	targetNetworksInput := &ec2.DescribeClientVpnTargetNetworksInput{
 		ClientVpnEndpointId: &clientVpnEndpointId,
 	}
-	targetNetworksResult, err := svc.DescribeClientVpnTargetNetworks(context.TODO(), targetNetworksInput)
+
+	log.Print(clientVpnEndpointId)
+
+	targetNetworksResult, err := svc.DescribeClientVpnTargetNetworks(ctx, targetNetworksInput)
+	log.Println(targetNetworksResult)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +71,7 @@ func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEnd
 	}
 
 	routeTablesInput := &ec2.DescribeRouteTablesInput{}
-	routeTablesResult, err := svc.DescribeRouteTables(context.TODO(), routeTablesInput)
+	routeTablesResult, err := svc.DescribeRouteTables(ctx, routeTablesInput)
 	if err != nil {
 		return nil, err
 	}
@@ -76,16 +89,56 @@ func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEnd
 	return associatedRouteTables, nil
 }
 
+func getRouteTables(ctx context.Context, svc *ec2.Client, vpnEndpointID string) ([]*types.RouteTable, error) {
+	params := &ec2.DescribeClientVpnRoutesInput{
+		ClientVpnEndpointId: aws.String(vpnEndpointID),
+	}
+
+	result, err := svc.DescribeClientVpnRoutes(ctx, params)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe client VPN target networks: %v", err)
+	}
+
+	routeTableDesc := make([]string, 0, len(result.Routes))
+	for _, route := range result.Routes {
+		log.Println(*route.Description)
+		log.Println(*route.DestinationCidr)
+		routeTableDesc = append(routeTableDesc, *route.Description)
+	}
+
+	routeTablesInput := &ec2.DescribeRouteTablesInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("association.route-table-id"),
+				Values: routeTableDesc,
+			},
+		},
+	}
+
+	routeTablesOutput, err := svc.DescribeRouteTables(ctx, routeTablesInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe route tables: %v", err)
+	}
+
+	routeTables := make([]*types.RouteTable, len(routeTablesOutput.RouteTables))
+	for i, rt := range routeTablesOutput.RouteTables {
+		routeTables[i] = &rt
+	}
+
+	return routeTables, nil
+}
+
 // func HandleRequest(ctx context.Context) (Response, error) {
 func HandleRequest() (Response, error) {
-	ctx, svc, err := NewAWSSession("ap-southeast-2")
+	ctx, svc, err := NewEC2Session("ap-southeast-2")
 
 	clientVpnEndpoints, err := ListClientVpnEndpoints(ctx, svc)
 	if err != nil {
 		return Response{}, err
 	}
 
-	routeTables, err := GetAssociatedRouteTables(ctx, svc, clientVpnEndpoints)
+	routeTables, err := getRouteTables(ctx, svc, "cvpn-endpoint-0180bd612766c9023")
 
 	return Response{
 		Message: fmt.Sprintf("Client VPN Endpoints: %s \n route tables: %s", clientVpnEndpoints, routeTables),
