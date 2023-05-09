@@ -135,10 +135,11 @@ func CreateRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID str
 	for _, ip := range ips {
 		suffix = suffix + 1
 		description := "Luke API IP Test" + strconv.Itoa(suffix)
+		ipFormatted := ip + "/32"
 
 		_, err := client.CreateClientVpnRoute(ctx, &ec2.CreateClientVpnRouteInput{
 			ClientVpnEndpointId:  &vpnEndpointID,
-			DestinationCidrBlock: &ip,
+			DestinationCidrBlock: &ipFormatted,
 			TargetVpcSubnetId:    &subnetId,
 			Description:          &description,
 		})
@@ -194,6 +195,7 @@ func HandleRequest() (Response, error) {
 		}, nil
 	} else {
 		DeleteRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023")
+		CreateRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023", GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"), "subnet-f126ac98")
 		return Response{
 			Message: fmt.Sprintf("Route tables were updated in %s", clientVpnEndpointID),
 		}, nil
