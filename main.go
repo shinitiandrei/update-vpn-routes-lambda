@@ -112,6 +112,7 @@ func DeleteRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID str
 		for _, route := range page.Routes {
 			if route.Description != nil {
 				if strings.Contains(*route.Description, "Luke API IP Test") {
+					log.Printf("Deleting route table: %v", *route.DestinationCidr)
 					_, err = client.DeleteClientVpnRoute(ctx, &ec2.DeleteClientVpnRouteInput{
 						ClientVpnEndpointId:  &vpnEndpointID,
 						DestinationCidrBlock: route.DestinationCidr,
@@ -120,12 +121,34 @@ func DeleteRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID str
 					if err != nil {
 						log.Printf("Error deleting VPN route %v: \n %v", *route.DestinationCidr, err)
 						os.Exit(1)
+					} else {
+						log.Printf("Route table deleted: %v", *route.DestinationCidr)
 					}
 				}
 			}
 		}
 	}
+}
 
+func CreateRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID string, ips []string, subnetId string) {
+	var suffix int
+	for _, ip := range ips {
+		suffix = suffix + 1
+		description := "Luke API IP Test" + strconv.Itoa(suffix)
+
+		_, err := client.CreateClientVpnRoute(ctx, &ec2.CreateClientVpnRouteInput{
+			ClientVpnEndpointId:  &vpnEndpointID,
+			DestinationCidrBlock: &ip,
+			TargetVpcSubnetId:    &subnetId,
+			Description:          &description,
+		})
+		if err != nil {
+			log.Printf("Error creating VPN route %v: \n %v", ip, err)
+			os.Exit(1)
+		} else {
+			log.Printf("Route table created: %v", ip)
+		}
+	}
 }
 
 func CompareIPList(original []string, changed []string) bool {
