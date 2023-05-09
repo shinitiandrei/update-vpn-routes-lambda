@@ -135,7 +135,13 @@ func CreateRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID str
 	for _, ip := range ips {
 		suffix = suffix + 1
 		description := "Luke API IP Test" + strconv.Itoa(suffix)
-		ipFormatted := ip + "/32"
+
+		var ipFormatted string
+		if !strings.Contains(ip, "/32") {
+			ipFormatted = ip + "/32"
+		} else {
+			ipFormatted = ip
+		}
 
 		_, err := client.CreateClientVpnRoute(ctx, &ec2.CreateClientVpnRouteInput{
 			ClientVpnEndpointId:  &vpnEndpointID,
@@ -152,26 +158,31 @@ func CreateRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID str
 	}
 }
 
-func CompareIPList(original []string, changed []string) bool {
-	found := true
-	for _, s1 := range original {
-		found = false
-		for _, s2 := range changed {
-			if s1 == s2 {
+// Returns not matched IPs
+func GetUnmatchedIps(currentIP []string, todayIP []string) []string {
+	var ips []string
+	for _, today := range todayIP {
+		found := false
+		if !strings.Contains(today, "/32") {
+			today = today + "/32"
+		}
+		for _, curr := range currentIP {
+			if !strings.Contains(curr, "/32") {
+				curr = curr + "/32"
+			}
+			if today == curr {
 				found = true
 				break
 			}
 		}
-		if found {
-			fmt.Printf("%s found in both lists\n", s1)
-		} else {
-			fmt.Printf("%s not found in both lists\n", s1)
+		if !found {
+			ips = append(ips, today)
 		}
 	}
-	return found
+	return ips
 }
 
-// func HandleRequest(ctx context.Context) (Response, error) {
+// func HandleRequest(ctx context.Context, name MyEvent) (Response, error) {
 func HandleRequest() (Response, error) {
 	ctx, client, err := NewEC2Session("ap-southeast-2")
 
@@ -187,15 +198,15 @@ func HandleRequest() (Response, error) {
 		return Response{}, err
 	}
 
-	found := CompareIPList(routeTables, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
-	log.Println("IPs are the same? ", strconv.FormatBool(found))
-	if found {
+	ipsToAdd := GetUnmatchedIps(routeTables, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
+	log.Println("IPS to add: ", ipsToAdd)
+	if len(ipsToAdd) == 0 {
 		return Response{
 			Message: fmt.Sprintf("Client VPN Endpoints: %s", clientVpnEndpointID),
 		}, nil
 	} else {
 		DeleteRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023")
-		CreateRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023", GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"), "subnet-f126ac98")
+		CreateRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023", ipsToAdd, "subnet-f126ac98")
 		return Response{
 			Message: fmt.Sprintf("Route tables were updated in %s", clientVpnEndpointID),
 		}, nil
