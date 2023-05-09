@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -48,50 +49,6 @@ func GetVPNEndpointID(ctx context.Context, svc *ec2.Client) (string, error) {
 	return string(clientVpnEndpointsJSON), nil
 }
 
-func GetAssociatedRouteTables(ctx context.Context, svc *ec2.Client, clientVpnEndpointId string) ([]string, error) {
-
-	sample := &ec2.DescribeClientVpnRoutesInput{
-		ClientVpnEndpointId: &clientVpnEndpointId,
-	}
-
-	log.Print(sample.MaxResults)
-
-	targetNetworksInput := &ec2.DescribeClientVpnTargetNetworksInput{
-		ClientVpnEndpointId: &clientVpnEndpointId,
-	}
-
-	log.Print(clientVpnEndpointId)
-
-	targetNetworksResult, err := svc.DescribeClientVpnTargetNetworks(ctx, targetNetworksInput)
-	log.Println(targetNetworksResult)
-	if err != nil {
-		return nil, err
-	}
-
-	associatedSubnets := make(map[string]struct{}, len(targetNetworksResult.ClientVpnTargetNetworks))
-	for _, targetNetwork := range targetNetworksResult.ClientVpnTargetNetworks {
-		associatedSubnets[*targetNetwork.TargetNetworkId] = struct{}{}
-	}
-
-	routeTablesInput := &ec2.DescribeRouteTablesInput{}
-	routeTablesResult, err := svc.DescribeRouteTables(ctx, routeTablesInput)
-	if err != nil {
-		return nil, err
-	}
-
-	associatedRouteTables := make([]string, 0)
-	for _, routeTable := range routeTablesResult.RouteTables {
-		for _, association := range routeTable.Associations {
-			if _, ok := associatedSubnets[*association.SubnetId]; ok {
-				associatedRouteTables = append(associatedRouteTables, *routeTable.RouteTableId)
-				break
-			}
-		}
-	}
-
-	return associatedRouteTables, nil
-}
-
 func GetIPsFromDomain(domain string) []string {
 	// retrieve A/AAAA records
 	log.Println("Fetching A/AAA IP addresses for ", domain)
@@ -107,7 +64,7 @@ func GetIPsFromDomain(domain string) []string {
 	return hostRecords
 }
 
-func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRoute, error) {
+func GetLukeRouteTables(client *ec2.Client, vpnEndpointID string) ([]string, error) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
@@ -115,11 +72,14 @@ func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpn
 	// fetch all VPN routes using pagination
 	var allRoutes []types.ClientVpnRoute
 
+	// store IPs from Luke's load balancer
+	var ips []string
+
 	paginator := ec2.NewDescribeClientVpnRoutesPaginator(client, params)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.Background())
 		if err != nil {
-			fmt.Println("Error describing VPN routes:", err)
+			log.Println("Error describing VPN routes:", err)
 			os.Exit(1)
 		}
 
@@ -127,6 +87,7 @@ func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpn
 			if route.Description != nil {
 				if strings.Contains(*route.Description, "Luke API IP") {
 					allRoutes = append(allRoutes, route)
+					ips = append(ips, *route.DestinationCidr)
 				}
 			}
 		}
@@ -137,7 +98,26 @@ func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpn
 		fmt.Println(*route.DestinationCidr)
 	}
 
-	return allRoutes, nil
+	return ips, nil
+}
+
+func CompareIPList(original []string, changed []string) bool {
+	found := true
+	for _, s1 := range original {
+		found = false
+		for _, s2 := range changed {
+			if s1 == s2 {
+				found = true
+				break
+			}
+		}
+		if found {
+			fmt.Printf("%s found in both lists\n", s1)
+		} else {
+			fmt.Printf("%s not found in both lists\n", s1)
+		}
+	}
+	return found
 }
 
 //func updateRouteTables(client *ec2.Client, vpnEndpointID, routeTableID string) error {
@@ -189,14 +169,23 @@ func HandleRequest() (Response, error) {
 		return Response{}, err
 	}
 
-	routeTables, err := GetRouteTables(svc, "cvpn-endpoint-0180bd612766c9023")
+	routeTables, err := GetLukeRouteTables(svc, "cvpn-endpoint-0180bd612766c9023")
 	if err != nil {
 		return Response{}, err
 	}
 
-	return Response{
-		Message: fmt.Sprintf("Client VPN Endpoints: %s \n route tables: %s", clientVpnEndpoints, routeTables),
-	}, nil
+	found := CompareIPList(routeTables, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
+	log.Println("IPs are the same? ", strconv.FormatBool(found))
+	if found {
+		return Response{
+			Message: fmt.Sprintf("Client VPN Endpoints: %s", clientVpnEndpoints),
+		}, nil
+	} else {
+
+		return Response{
+			Message: fmt.Sprintf("Route tables were updated in %s", clientVpnEndpoints),
+		}, nil
+	}
 }
 
 func main() {
