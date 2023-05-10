@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func DeleteAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpointID string) {
+func DeleteAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpointID string, ips []string) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
@@ -65,10 +65,10 @@ func CreateAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpoi
 			Description:          &description,
 		})
 		if err != nil {
-			log.Printf("Error creating VPN route %v: \n %v", ip, err)
+			log.Printf("Error creating auhtorization rule for %v: \n %v", ip, err)
 			os.Exit(1)
 		} else {
-			log.Printf("Route table created: %v", ip)
+			log.Printf("Authorization rule created for: %v", ip)
 		}
 	}
 }
@@ -94,13 +94,33 @@ func GetLukeAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]stri
 
 		for _, authrule := range page.AuthorizationRules {
 			if authrule.Description != nil {
-				if strings.Contains(*authrule.Description, "Luke API IP") {
+				if strings.Contains(*authrule.Description, "Luke") {
 					allRoutes = append(allRoutes, authrule)
 					ips = append(ips, *authrule.DestinationCidr)
 				}
 			}
 		}
 	}
-
 	return ips, nil
+}
+
+func UpdateAuthorizationRules(ctx context.Context, client *ec2.Client, clientVpnEndpointID string) {
+	authRules, err := GetLukeAuthorizationRules(client, clientVpnEndpointID)
+	if err != nil {
+		log.Printf("Error getting auth rules from AWS VPN ID %v: \n %v", clientVpnEndpointID, err)
+		os.Exit(1)
+	}
+
+	log.Printf("Auth rules: %v\n", authRules)
+
+	ipsToAdd := GetUnmatchedIpsFromLookup(authRules, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
+
+	if len(ipsToAdd) == 0 {
+		log.Println("All IPs matched, no changes.")
+	} else {
+		log.Println("IPs to add: ", ipsToAdd)
+		DeleteAuthorizationRules(ctx, client, clientVpnEndpointID, ipsToAdd)
+		//CreateAuthorizationRules(ctx, client, clientVpnEndpointID, ipsToAdd, "subnet-f126ac98")
+		log.Printf("Authorization rules were updated in %s\n", clientVpnEndpointID)
+	}
 }

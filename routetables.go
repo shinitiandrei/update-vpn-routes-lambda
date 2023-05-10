@@ -104,3 +104,22 @@ func GetLukeRouteTables(client *ec2.Client, vpnEndpointID string) ([]string, err
 
 	return ips, nil
 }
+
+func UpdateRouteTables(ctx context.Context, client *ec2.Client, clientVpnEndpointID string) {
+	routeTables, err := GetLukeRouteTables(client, "cvpn-endpoint-0180bd612766c9023")
+	if err != nil {
+		log.Printf("Error getting route tables from VPN client %v: \n %v", clientVpnEndpointID, err)
+		os.Exit(1)
+	}
+
+	ipsToAdd := GetUnmatchedIpsFromLookup(routeTables, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
+
+	if len(ipsToAdd) == 0 {
+		log.Println("All IPs matched, no changes.")
+	} else {
+		log.Println("IPs to add: ", ipsToAdd)
+		DeleteRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023")
+		CreateRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023", ipsToAdd, "subnet-f126ac98")
+		log.Printf("Route tables were updated in %s\n", clientVpnEndpointID)
+	}
+}

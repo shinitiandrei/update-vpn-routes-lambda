@@ -60,15 +60,39 @@ func GetIPsFromDomain(domain string) []string {
 	return hostRecords
 }
 
-// Returns not matched IPs
-func GetUnmatchedIps(currentIP []string, todayIP []string) []string {
+// Returns not matched IPs from nslookup of luke api
+func GetUnmatchedIpsFromLookup(vpnIPs []string, todayIPs []string) []string {
 	var ips []string
-	for _, today := range todayIP {
+	for _, today := range todayIPs {
 		found := false
 		if !strings.Contains(today, "/32") {
 			today = today + "/32"
 		}
-		for _, curr := range currentIP {
+		for _, curr := range vpnIPs {
+			if !strings.Contains(curr, "/32") {
+				curr = curr + "/32"
+			}
+			if today == curr {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ips = append(ips, today)
+		}
+	}
+	return ips
+}
+
+// Returns not matched IPs from nslookup of luke api
+func GetUnmatchedIpsFromVPN(vpnIPs []string, todayIPs []string) []string {
+	var ips []string
+	for _, today := range todayIPs {
+		found := false
+		if !strings.Contains(today, "/32") {
+			today = today + "/32"
+		}
+		for _, curr := range vpnIPs {
 			if !strings.Contains(curr, "/32") {
 				curr = curr + "/32"
 			}
@@ -88,33 +112,18 @@ func GetUnmatchedIps(currentIP []string, todayIP []string) []string {
 func HandleRequest() (Response, error) {
 	ctx, client, err := NewEC2Session("ap-southeast-2")
 
-	//lukeIps := GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au")
-
 	clientVpnEndpointID, err := GetVPNEndpointID(ctx, client)
 	if err != nil {
 		return Response{}, err
 	}
+	log.Println(clientVpnEndpointID)
 
-	routeTables, err := GetLukeRouteTables(client, "cvpn-endpoint-0180bd612766c9023")
-	if err != nil {
-		return Response{}, err
-	}
+	//UpdateRouteTables(ctx, client, "cvpn-endpoint-0180bd612766c9023")
+	UpdateAuthorizationRules(ctx, client, "cvpn-endpoint-0180bd612766c9023")
 
-	ipsToAdd := GetUnmatchedIps(routeTables, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
-
-	if len(ipsToAdd) == 0 {
-		log.Println("All IPs matched, no changes.")
-		return Response{
-			Message: fmt.Sprintf("Client VPN Endpoints: %s", clientVpnEndpointID),
-		}, nil
-	} else {
-		log.Println("IPs to add: ", ipsToAdd)
-		DeleteRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023")
-		CreateRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023", ipsToAdd, "subnet-f126ac98")
-		return Response{
-			Message: fmt.Sprintf("Route tables were updated in %s", clientVpnEndpointID),
-		}, nil
-	}
+	return Response{
+		Message: "success",
+	}, nil
 }
 
 func main() {
