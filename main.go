@@ -84,25 +84,25 @@ func GetUnmatchedIpsFromLookup(vpnIPs []string, todayIPs []string) []string {
 	return ips
 }
 
-// Returns not matched IPs from nslookup of luke api
+// Returns not matched IPs from VPN perspective
 func GetUnmatchedIpsFromVPN(vpnIPs []string, todayIPs []string) []string {
 	var ips []string
-	for _, today := range todayIPs {
+	for _, vpnIP := range vpnIPs {
 		found := false
-		if !strings.Contains(today, "/32") {
-			today = today + "/32"
+		if !strings.Contains(vpnIP, "/32") {
+			vpnIP = vpnIP + "/32"
 		}
-		for _, curr := range vpnIPs {
-			if !strings.Contains(curr, "/32") {
-				curr = curr + "/32"
+		for _, todayIP := range todayIPs {
+			if !strings.Contains(todayIP, "/32") {
+				todayIP = todayIP + "/32"
 			}
-			if today == curr {
+			if vpnIP == todayIP {
 				found = true
 				break
 			}
 		}
 		if !found {
-			ips = append(ips, today)
+			ips = append(ips, vpnIP)
 		}
 	}
 	return ips

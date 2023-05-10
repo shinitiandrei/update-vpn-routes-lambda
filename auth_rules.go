@@ -114,12 +114,13 @@ func UpdateAuthorizationRules(ctx context.Context, client *ec2.Client, clientVpn
 	log.Printf("Auth rules: %v\n", authRules)
 
 	ipsToAdd := GetUnmatchedIpsFromLookup(authRules, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
+	ipsToRemove := GetUnmatchedIpsFromVPN(authRules, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
 
 	if len(ipsToAdd) == 0 {
-		log.Println("All IPs matched, no changes.")
+		log.Println("All IPs match, no changes.")
 	} else {
 		log.Println("IPs to add: ", ipsToAdd)
-		DeleteAuthorizationRules(ctx, client, clientVpnEndpointID, ipsToAdd)
+		DeleteAuthorizationRules(ctx, client, clientVpnEndpointID, ipsToRemove)
 		//CreateAuthorizationRules(ctx, client, clientVpnEndpointID, ipsToAdd, "subnet-f126ac98")
 		log.Printf("Authorization rules were updated in %s\n", clientVpnEndpointID)
 	}
