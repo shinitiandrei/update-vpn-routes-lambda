@@ -47,10 +47,10 @@ func GetVPNEndpointID(ctx context.Context, svc *ec2.Client) (string, error) {
 
 func GetIPsFromDomain(domain string) []string {
 	// retrieve A/AAAA records
-	log.Println("Fetching A/AAA IP addresses for ", domain)
+	log.Println("DEBUG: Fetching A/AAA IP addresses for ", domain)
 	hostRecords, err := net.LookupHost(domain)
 	if err == nil {
-		fmt.Println("IP addresses:")
+		fmt.Println("DEBUG: IP addresses:")
 		for _, record := range hostRecords {
 			fmt.Println(record)
 		}
@@ -101,12 +101,14 @@ func HandleRequest() (Response, error) {
 	}
 
 	ipsToAdd := GetUnmatchedIps(routeTables, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
-	log.Println("IPS to add: ", ipsToAdd)
+
 	if len(ipsToAdd) == 0 {
+		log.Println("All IPs matched, no changes.")
 		return Response{
 			Message: fmt.Sprintf("Client VPN Endpoints: %s", clientVpnEndpointID),
 		}, nil
 	} else {
+		log.Println("IPs to add: ", ipsToAdd)
 		DeleteRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023")
 		CreateRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023", ipsToAdd, "subnet-f126ac98")
 		return Response{
