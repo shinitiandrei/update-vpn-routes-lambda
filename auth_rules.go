@@ -25,10 +25,10 @@ func DeleteAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpoi
 	})
 
 	if err != nil {
-		log.Printf("Error deleting auhtorization rule for %v: \n %v", ip, err)
+		log.Printf("ERROR: Error deleting auhtorization rule for %v: \n %v", ip, err)
 		os.Exit(1)
 	} else {
-		log.Printf("Authorization rule deleted for: %v", ip)
+		log.Printf("INFO: Authorization rule deleted for: %v", ip)
 	}
 }
 

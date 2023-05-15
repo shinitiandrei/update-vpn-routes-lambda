@@ -7,83 +7,50 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 )
 
-func DeleteRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID string) {
+func DeleteRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID string, ip string, subnetID string) {
+	ipFormatted := FormatIPWith32Cidr(ip)
+
+	_, err := client.DeleteClientVpnRoute(ctx, &ec2.DeleteClientVpnRouteInput{
+		ClientVpnEndpointId:  &vpnEndpointID,
+		DestinationCidrBlock: &ipFormatted,
+		TargetVpcSubnetId:    &subnetID,
+	})
+
+	if err != nil {
+		log.Printf("ERROR: Error deleting route table for %v: \n %v", ip, err)
+		os.Exit(1)
+	} else {
+		log.Printf("INFO: Route table deleted: %v", ip)
+	}
+}
+
+func CreateRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID string, ip string, subnetId string, desc string) {
+	ipFormatted := FormatIPWith32Cidr(ip)
+	_, err := client.CreateClientVpnRoute(ctx, &ec2.CreateClientVpnRouteInput{
+		ClientVpnEndpointId:  &vpnEndpointID,
+		DestinationCidrBlock: &ipFormatted,
+		TargetVpcSubnetId:    &subnetId,
+		Description:          &desc,
+	})
+
+	if err != nil {
+		log.Printf("ERROR: Error creating VPN route %v: \n %v", ip, err)
+		os.Exit(1)
+	} else {
+		log.Printf("INFO: Route table created: %v", ip)
+	}
+}
+
+func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRoute, error) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
 
-	paginator := ec2.NewDescribeClientVpnRoutesPaginator(client, params)
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(context.Background())
-		if err != nil {
-			log.Println("Error describing VPN routes:", err)
-			os.Exit(1)
-		}
-
-		for _, route := range page.Routes {
-			if route.Description != nil {
-				if strings.Contains(*route.Description, "Luke API IP Test") {
-					log.Printf("Deleting route table: %v", *route.DestinationCidr)
-					_, err = client.DeleteClientVpnRoute(ctx, &ec2.DeleteClientVpnRouteInput{
-						ClientVpnEndpointId:  &vpnEndpointID,
-						DestinationCidrBlock: route.DestinationCidr,
-						TargetVpcSubnetId:    route.TargetSubnet,
-					})
-					if err != nil {
-						log.Printf("Error deleting VPN route %v: \n %v", *route.DestinationCidr, err)
-						os.Exit(1)
-					} else {
-						log.Printf("Route table deleted: %v", *route.DestinationCidr)
-					}
-				}
-			}
-		}
-	}
-}
-
-func CreateRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID string, ips []string, subnetId string) {
-	var suffix int
-	for _, ip := range ips {
-		suffix = suffix + 1
-		description := "Luke API IP Test" + strconv.Itoa(suffix)
-
-		var ipFormatted string
-		if !strings.Contains(ip, "/32") {
-			ipFormatted = ip + "/32"
-		} else {
-			ipFormatted = ip
-		}
-
-		_, err := client.CreateClientVpnRoute(ctx, &ec2.CreateClientVpnRouteInput{
-			ClientVpnEndpointId:  &vpnEndpointID,
-			DestinationCidrBlock: &ipFormatted,
-			TargetVpcSubnetId:    &subnetId,
-			Description:          &description,
-		})
-		if err != nil {
-			log.Printf("Error creating VPN route %v: \n %v", ip, err)
-			os.Exit(1)
-		} else {
-			log.Printf("Route table created: %v", ip)
-		}
-	}
-}
-
-func GetLukeRouteTables(client *ec2.Client, vpnEndpointID string) ([]string, error) {
-	params := &ec2.DescribeClientVpnRoutesInput{
-		ClientVpnEndpointId: aws.String(vpnEndpointID),
-	}
-
-	// fetch all VPN routes using pagination
 	var allRoutes []types.ClientVpnRoute
 
-	// store IPs from Luke's load balancer
-	var ips []string
-
 	paginator := ec2.NewDescribeClientVpnRoutesPaginator(client, params)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.Background())
@@ -94,32 +61,63 @@ func GetLukeRouteTables(client *ec2.Client, vpnEndpointID string) ([]string, err
 
 		for _, route := range page.Routes {
 			if route.Description != nil {
-				if strings.Contains(*route.Description, "Luke API IP") {
+				if strings.Contains(*route.Description, "Luke API IP ") {
 					allRoutes = append(allRoutes, route)
-					ips = append(ips, *route.DestinationCidr)
 				}
 			}
 		}
 	}
 
-	return ips, nil
+	return allRoutes, nil
 }
 
-func UpdateRouteTables(ctx context.Context, client *ec2.Client, clientVpnEndpointID string) {
-	routeTables, err := GetLukeRouteTables(client, "cvpn-endpoint-0180bd612766c9023")
+func UpdateRouteTables(ctx context.Context, client *ec2.Client, clientVpnEndpointID string, domain string) {
+	routeTables, err := GetRouteTables(client, clientVpnEndpointID)
 	if err != nil {
 		log.Printf("Error getting route tables from VPN client %v: \n %v", clientVpnEndpointID, err)
 		os.Exit(1)
 	}
 
-	ipsToAdd := GetUnmatchedIpsFromLookup(routeTables, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
+	var routeTableDestCidrs []string
+	for _, rt := range routeTables {
+		routeTableDestCidrs = append(routeTableDestCidrs, *rt.DestinationCidr)
+	}
+
+	ipsToAdd := GetUnmatchedIPs(routeTableDestCidrs, GetIPsFromDomain(domain))
+	ipsToRemove := GetUnmatchedIPs(GetIPsFromDomain(domain), routeTableDestCidrs)
 
 	if len(ipsToAdd) == 0 {
-		log.Println("All IPs matched, no changes.")
+		log.Println("INFO: All IPs matched in route tables, no changes.")
 	} else {
-		log.Println("IPs to add: ", ipsToAdd)
-		DeleteRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023")
-		CreateRouteTable(ctx, client, "cvpn-endpoint-0180bd612766c9023", ipsToAdd, "subnet-f126ac98")
-		log.Printf("Route tables were updated in %s\n", clientVpnEndpointID)
+		// Stores the description that's about to be replaced
+		var descToReplace []string
+		var subnet string
+
+		// It will match the ip to be removed and store its description to be added as a new IP.
+		for _, ip := range ipsToRemove {
+			for _, rt := range routeTables {
+				if ip == *rt.DestinationCidr {
+					descToReplace = append(descToReplace, *rt.Description)
+					subnet = *rt.TargetSubnet
+					DeleteRouteTable(ctx, client, clientVpnEndpointID, ip, subnet)
+				}
+			}
+		}
+
+		log.Printf("Description to be replaced: %v", descToReplace)
+		log.Printf("IPs to be removed: %v", ipsToRemove)
+		log.Printf("IPs to be added: %v", ipsToAdd)
+
+		if len(descToReplace) == len(ipsToAdd) {
+			for _, desc := range descToReplace {
+				for _, ip := range ipsToAdd {
+					CreateRouteTable(ctx, client, clientVpnEndpointID, ip, subnet, desc)
+					log.Printf("INFO: Route tables were updated in %s\n", clientVpnEndpointID)
+				}
+			}
+		} else {
+			log.Printf("ERROR: number(%v) of ips don't match the number(%v) of descriptions", len(ipsToAdd), len(descToReplace))
+			os.Exit(1)
+		}
 	}
 }
