@@ -51,7 +51,7 @@ func CreateAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpoi
 	}
 }
 
-func GetAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]ClientVpnAuthorizationRule, error) {
+func GetAuthorizationRules(client *ec2.Client, vpnEndpointID string, desc string) ([]ClientVpnAuthorizationRule, error) {
 	params := &ec2.DescribeClientVpnAuthorizationRulesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
@@ -69,7 +69,7 @@ func GetAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]ClientVp
 
 		for _, authrule := range page.AuthorizationRules {
 			if authrule.Description != nil {
-				if strings.Contains(*authrule.Description, "Luke Test") {
+				if strings.Contains(*authrule.Description, desc) {
 					allAuthRules = append(allAuthRules, ClientVpnAuthorizationRule{
 						Description: authrule.Description,
 						DestCidr:    authrule.DestinationCidr,
@@ -82,7 +82,7 @@ func GetAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]ClientVp
 }
 
 func UpdateAuthorizationRules(ctx context.Context, client *ec2.Client, clientVpnEndpointID string, domain string) {
-	authRules, err := GetAuthorizationRules(client, clientVpnEndpointID)
+	authRules, err := GetAuthorizationRules(client, clientVpnEndpointID, domain)
 	if err != nil {
 		log.Printf("Error getting auth rules from AWS VPN ID %v: \n %v", clientVpnEndpointID, err)
 		os.Exit(1)
@@ -113,22 +113,11 @@ func UpdateAuthorizationRules(ctx context.Context, client *ec2.Client, clientVpn
 			}
 		}
 
-		log.Printf("Description to be replaced: %v", descToReplace)
-		log.Printf("IPs to be removed: %v", ipsToRemove)
-		log.Printf("IPs to be added: %v", ipsToAdd)
-
-		if len(descToReplace) == len(ipsToAdd) {
-			for _, desc := range descToReplace {
-				for _, ip := range ipsToAdd {
-					log.Println("INFO: IPs to add: ", ipsToAdd)
-					log.Println("INFO: IPs to remove: ", ipsToRemove)
-					CreateAuthorizationRules(ctx, client, clientVpnEndpointID, ip, desc)
-					log.Printf("Authorization rules were updated in %s\n", clientVpnEndpointID, ip)
-				}
+		for _, desc := range descToReplace {
+			for _, ip := range ipsToAdd {
+				CreateAuthorizationRules(ctx, client, clientVpnEndpointID, ip, desc)
+				log.Printf("Authorization rules were updated in %v: %v\n", clientVpnEndpointID, ip)
 			}
-		} else {
-			log.Printf("ERROR: number(%v) of ips don't match the number(%v) of descriptions", len(ipsToAdd), len(descToReplace))
-			os.Exit(1)
 		}
 	}
 }

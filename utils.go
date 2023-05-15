@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"log"
 	"net"
+	"os"
 	"strings"
 )
 
@@ -45,15 +45,12 @@ func GetUnmatchedIPs(original []string, toMatch []string) []string {
 
 func GetIPsFromDomain(domain string) []string {
 	// retrieve A/AAAA records
-	log.Println("DEBUG: Fetching A/AAA IP addresses for ", domain)
 	hostRecords, err := net.LookupHost(domain)
 	if err == nil {
-		fmt.Println("DEBUG: IP addresses:")
-		for _, record := range hostRecords {
-			fmt.Println(record)
-		}
+		fmt.Printf("DEBUG: IP addresses fetched for %v: %v\n", domain, hostRecords)
 	} else {
-		fmt.Println("Error:", err)
+		fmt.Printf("ERROR: Unable to fetch IP addresses for %v: %v\n", domain, hostRecords)
+		os.Exit(1)
 	}
 	return hostRecords
 }

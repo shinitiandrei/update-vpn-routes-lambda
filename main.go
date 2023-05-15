@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"os"
-	"strconv"
 )
 
 type Response struct {
@@ -33,14 +32,26 @@ func HandleRequest(input Input) (Response, error) {
 			os.Exit(1)
 		}
 
-		log.Printf("Route tables found: %v", strconv.Itoa(len(routeTables)))
 		if len(routeTables) == 0 {
 			for _, ip := range ipsFromDomain {
 				CreateRouteTable(ctx, client, clientVpnEndpointID, ip, input.Subnet, domain)
 			}
 		} else {
-			UpdateRouteTables(ctx, client, "cvpn-endpoint-0180bd612766c9023", domain)
-			//UpdateAuthorizationRules(ctx, client, "cvpn-endpoint-0180bd612766c9023", domain)
+			UpdateRouteTables(ctx, client, clientVpnEndpointID, domain)
+		}
+
+		authRules, err := GetAuthorizationRules(client, clientVpnEndpointID, domain)
+		if err != nil {
+			log.Printf("ERROR: Error getting authorisation rules for %v: \n %v", clientVpnEndpointID, err)
+			os.Exit(1)
+		}
+
+		if len(authRules) == 0 {
+			for _, ip := range ipsFromDomain {
+				CreateAuthorizationRules(ctx, client, clientVpnEndpointID, ip, domain)
+			}
+		} else {
+			UpdateAuthorizationRules(ctx, client, clientVpnEndpointID, domain)
 		}
 	}
 

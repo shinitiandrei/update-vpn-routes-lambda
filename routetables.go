@@ -88,7 +88,7 @@ func UpdateRouteTables(ctx context.Context, client *ec2.Client, clientVpnEndpoin
 	ipsToRemove := GetUnmatchedIPs(ipsFromDomain, routeTableDestCidrs)
 
 	if len(ipsToAdd) == 0 {
-		log.Println("INFO: All IPs matched in route tables, no changes.")
+		log.Println("INFO: All IPs matched in route tables, no changes applied.")
 	} else {
 		// Stores the description that's about to be replaced
 		var descToReplace []string
