@@ -44,29 +44,26 @@ func CreateAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpoi
 	})
 
 	if err != nil {
-		log.Printf("Error creating auhtorization rule for %v: \n %v", ip, err)
+		log.Printf("ERROR: Error creating auhtorization rule for %v: \n %v", ip, err)
 		os.Exit(1)
 	} else {
 		log.Printf("Authorization rule created for: %v", ip)
 	}
 }
 
-func GetLukeAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]ClientVpnAuthorizationRule, error) {
+func GetAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]ClientVpnAuthorizationRule, error) {
 	params := &ec2.DescribeClientVpnAuthorizationRulesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
 
 	var allAuthRules []ClientVpnAuthorizationRule
 
-	// store IPs from Luke's load balancer
-	var ips []string
-
 	// fetch all VPN Authorization rules using pagination
 	paginator := ec2.NewDescribeClientVpnAuthorizationRulesPaginator(client, params)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.Background())
 		if err != nil {
-			log.Println("Error describing VPN routes:", err)
+			log.Println("Error describing VPN authorization rules:", err)
 			os.Exit(1)
 		}
 
@@ -77,7 +74,6 @@ func GetLukeAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]Clie
 						Description: authrule.Description,
 						DestCidr:    authrule.DestinationCidr,
 					})
-					ips = append(ips, *authrule.DestinationCidr)
 				}
 			}
 		}
@@ -85,23 +81,23 @@ func GetLukeAuthorizationRules(client *ec2.Client, vpnEndpointID string) ([]Clie
 	return allAuthRules, nil
 }
 
-func UpdateAuthorizationRules(ctx context.Context, client *ec2.Client, clientVpnEndpointID string) {
-	lukeAuthRules, err := GetLukeAuthorizationRules(client, clientVpnEndpointID)
+func UpdateAuthorizationRules(ctx context.Context, client *ec2.Client, clientVpnEndpointID string, domain string) {
+	authRules, err := GetAuthorizationRules(client, clientVpnEndpointID)
 	if err != nil {
 		log.Printf("Error getting auth rules from AWS VPN ID %v: \n %v", clientVpnEndpointID, err)
 		os.Exit(1)
 	}
 
-	var lukeAuthDestCidrs []string
-	for _, lukeAuthRule := range lukeAuthRules {
-		lukeAuthDestCidrs = append(lukeAuthDestCidrs, *lukeAuthRule.DestCidr)
+	var authDestCidrs []string
+	for _, authRule := range authRules {
+		authDestCidrs = append(authDestCidrs, *authRule.DestCidr)
 	}
 
-	ipsToAdd := GetUnmatchedIPs(lukeAuthDestCidrs, GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"))
-	ipsToRemove := GetUnmatchedIPs(GetIPsFromDomain("api.luke.kubernetes.hipagesgroup.com.au"), lukeAuthDestCidrs)
+	ipsToAdd := GetUnmatchedIPs(authDestCidrs, GetIPsFromDomain(domain))
+	ipsToRemove := GetUnmatchedIPs(GetIPsFromDomain(domain), authDestCidrs)
 
 	if len(ipsToAdd) == 0 {
-		log.Println("INFO: All IPs match, no changes.")
+		log.Println("INFO: All IPs match in authorization rules, no changes.")
 	} else {
 
 		// Stores the description that's about to be replaced
@@ -109,7 +105,7 @@ func UpdateAuthorizationRules(ctx context.Context, client *ec2.Client, clientVpn
 
 		// It will match the ip to be removed and store its description to be added as a new IP.
 		for _, ip := range ipsToRemove {
-			for _, rule := range lukeAuthRules {
+			for _, rule := range authRules {
 				if ip == *rule.DestCidr {
 					descToReplace = append(descToReplace, *rule.Description)
 					DeleteAuthorizationRules(ctx, client, clientVpnEndpointID, ip)
