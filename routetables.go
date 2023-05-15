@@ -44,7 +44,7 @@ func CreateRouteTable(ctx context.Context, client *ec2.Client, vpnEndpointID str
 	}
 }
 
-func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpnRoute, error) {
+func GetRouteTables(client *ec2.Client, vpnEndpointID string, desc string) ([]types.ClientVpnRoute, error) {
 	params := &ec2.DescribeClientVpnRoutesInput{
 		ClientVpnEndpointId: aws.String(vpnEndpointID),
 	}
@@ -61,7 +61,7 @@ func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpn
 
 		for _, route := range page.Routes {
 			if route.Description != nil {
-				if strings.Contains(*route.Description, "Luke API IP ") {
+				if strings.Contains(*route.Description, desc) {
 					allRoutes = append(allRoutes, route)
 				}
 			}
@@ -72,7 +72,8 @@ func GetRouteTables(client *ec2.Client, vpnEndpointID string) ([]types.ClientVpn
 }
 
 func UpdateRouteTables(ctx context.Context, client *ec2.Client, clientVpnEndpointID string, domain string) {
-	routeTables, err := GetRouteTables(client, clientVpnEndpointID)
+	routeTables, err := GetRouteTables(client, clientVpnEndpointID, domain)
+	ipsFromDomain := GetIPsFromDomain(domain)
 	if err != nil {
 		log.Printf("Error getting route tables from VPN client %v: \n %v", clientVpnEndpointID, err)
 		os.Exit(1)
@@ -83,8 +84,8 @@ func UpdateRouteTables(ctx context.Context, client *ec2.Client, clientVpnEndpoin
 		routeTableDestCidrs = append(routeTableDestCidrs, *rt.DestinationCidr)
 	}
 
-	ipsToAdd := GetUnmatchedIPs(routeTableDestCidrs, GetIPsFromDomain(domain))
-	ipsToRemove := GetUnmatchedIPs(GetIPsFromDomain(domain), routeTableDestCidrs)
+	ipsToAdd := GetUnmatchedIPs(routeTableDestCidrs, ipsFromDomain)
+	ipsToRemove := GetUnmatchedIPs(ipsFromDomain, routeTableDestCidrs)
 
 	if len(ipsToAdd) == 0 {
 		log.Println("INFO: All IPs matched in route tables, no changes.")
@@ -108,16 +109,11 @@ func UpdateRouteTables(ctx context.Context, client *ec2.Client, clientVpnEndpoin
 		log.Printf("IPs to be removed: %v", ipsToRemove)
 		log.Printf("IPs to be added: %v", ipsToAdd)
 
-		if len(descToReplace) == len(ipsToAdd) {
-			for _, desc := range descToReplace {
-				for _, ip := range ipsToAdd {
-					CreateRouteTable(ctx, client, clientVpnEndpointID, ip, subnet, desc)
-					log.Printf("INFO: Route tables were updated in %s\n", clientVpnEndpointID)
-				}
+		for _, desc := range descToReplace {
+			for _, ip := range ipsToAdd {
+				CreateRouteTable(ctx, client, clientVpnEndpointID, ip, subnet, desc)
+				log.Printf("INFO: Route tables were updated in %s\n", clientVpnEndpointID)
 			}
-		} else {
-			log.Printf("ERROR: number(%v) of ips don't match the number(%v) of descriptions", len(ipsToAdd), len(descToReplace))
-			os.Exit(1)
 		}
 	}
 }
