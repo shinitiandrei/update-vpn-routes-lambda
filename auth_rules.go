@@ -16,20 +16,20 @@ type ClientVpnAuthorizationRule struct {
 
 func DeleteAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpointID string, ip string) {
 	ipFormatted := FormatIPWith32Cidr(ip)
-	log.Printf("Deleting rule table: %v", ip)
+	revokeAllGroups := true
 
-	_, err := client.DeleteClientVpnRoute(ctx, &ec2.DeleteClientVpnRouteInput{
-		ClientVpnEndpointId:  &vpnEndpointID,
-		DestinationCidrBlock: &ipFormatted,
+	_, err := client.RevokeClientVpnIngress(ctx, &ec2.RevokeClientVpnIngressInput{
+		ClientVpnEndpointId: &vpnEndpointID,
+		TargetNetworkCidr:   &ipFormatted,
+		RevokeAllGroups:     &revokeAllGroups,
 	})
 
 	if err != nil {
-		log.Printf("Error creating auhtorization rule for %v: \n %v", ip, err)
+		log.Printf("Error deleting auhtorization rule for %v: \n %v", ip, err)
 		os.Exit(1)
 	} else {
-		log.Printf("Authorization rule created for: %v", ip)
+		log.Printf("Authorization rule deleted for: %v", ip)
 	}
-
 }
 
 func CreateAuthorizationRules(ctx context.Context, client *ec2.Client, vpnEndpointID string, ip string, desc string) {
